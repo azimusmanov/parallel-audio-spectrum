@@ -1,0 +1,13 @@
+# GPU requirements for Linux/Windows with NVIDIA CUDA
+# Use this file on station with NVIDIA GPU
+
+numpy
+cupy-cuda12x  # For CUDA 12.x - adjust based on your CUDA version
+librosa
+soundfile
+matplotlib
+
+# Note: Check CUDA version with: nvidia-smi
+# Then install the appropriate cupy package:
+# - CUDA 11.x: cupy-cuda11x
+# - CUDA 12.x: cupy-cuda12x
