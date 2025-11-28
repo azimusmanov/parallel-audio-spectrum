@@ -14,6 +14,7 @@ def load_audio(path: str) -> tuple[np.ndarray, int]:
     Returns:
         Tuple of (audio samples, sample rate)
     """
+    # Load with original sample rate (sr=None) to avoid resampling issues
     y, sr = librosa.load(path, sr=None, mono=True)
     return y, sr
 

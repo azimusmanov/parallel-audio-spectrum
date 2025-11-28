@@ -57,7 +57,7 @@ def main(audio_path):
         print(f"  GPU pipeline not available (CuPy not installed)")
         print(f"  Skipping GPU benchmark - run on Linux/Windows with NVIDIA GPU")
         print(f"\n  Animating CPU result...")
-        animate_spectrum(spec_cpu, interval_ms=30)
+        animate_spectrum(spec_cpu, audio=y, sample_rate=sr, hop_size=hop_size)
         return
     
     try:
@@ -76,13 +76,13 @@ def main(audio_path):
         
         # Animate GPU result
         print(f"\nLaunching spectrum animation...")
-        animate_spectrum(spec_gpu, interval_ms=30)
+        animate_spectrum(spec_gpu, audio=y, sample_rate=sr, hop_size=hop_size)
         
     except Exception as e:
         print(f"  GPU computation failed: {e}")
         print(f"  This may be due to missing CUDA or CuPy installation.")
         print(f"\n  Animating CPU result instead...")
-        animate_spectrum(spec_cpu, interval_ms=30)
+        animate_spectrum(spec_cpu, audio=y, sample_rate=sr, hop_size=hop_size)
 
 
 if __name__ == '__main__':
