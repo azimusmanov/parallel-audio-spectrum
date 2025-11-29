@@ -35,8 +35,15 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
     spectrogram_masked = np.where(spectrogram < threshold, threshold, spectrogram)
     log_spectrogram = 20 * np.log10(spectrogram_masked)  # Use 20*log10 for dB scale
     
-    # Set a more reasonable floor (like -60 dB instead of -200 dB)
-    log_spectrogram = np.maximum(log_spectrogram, -60)
+    # Normalize to make it more intuitive: silence ≈ 0, loud signals = positive
+    # Find the noise floor and peak
+    noise_floor = 20 * np.log10(threshold)  # dB value of our threshold
+    
+    # Shift so that noise floor becomes ~0
+    log_spectrogram = log_spectrogram - noise_floor
+    
+    # Clamp negative values (below noise floor) to 0
+    log_spectrogram = np.maximum(log_spectrogram, 0)
     
     # Create a colorful gradient colormap
     colors = ['#000080', '#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000', '#FF00FF']
@@ -48,8 +55,11 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
     fig, ax = plt.subplots(figsize=(12, 8))
     x = np.arange(num_bins)
     
-    # Create bars with initial data
-    bars = ax.bar(x, log_spectrogram[0], width=1.0, color='cyan', alpha=0.8)
+    # Create mirrored bars for professional visualizer look
+    # Top bars (positive direction from center)
+    bars_top = ax.bar(x, log_spectrogram[0], width=1.0, color='cyan', alpha=0.8, bottom=0)
+    # Bottom bars (negative direction from center, but showing same positive magnitude values)
+    bars_bottom = ax.bar(x, log_spectrogram[0], width=1.0, color='cyan', alpha=0.8, bottom=-log_spectrogram[0])
     
     # Calculate frequency labels (assuming we have sample rate info)
     if sample_rate is not None:
@@ -64,17 +74,28 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
     else:
         ax.set_xlabel('Frequency Bin', fontsize=12, color='white')
     
-    ax.set_ylabel('Magnitude (dB)', fontsize=12, color='white') 
+    ax.set_ylabel('Magnitude (dB above noise floor)', fontsize=12, color='white') 
     ax.set_title('Audio Spectrum Animation', fontsize=14, color='white')
     
-    # Set y-limits based on log-scaled data
-    y_min = np.min(log_spectrogram) - 0.5
-    y_max = np.max(log_spectrogram) + 0.5
-    ax.set_ylim(y_min, y_max)
+    # Set y-limits based on log-scaled data - make it symmetric around 0
+    data_max = np.max(log_spectrogram) + 0.5
+    ax.set_ylim(-data_max, data_max)  # Symmetric: from -max to +max
+    y_min = -data_max
+    y_max = data_max
+    
+    # Custom Y-axis labels for mirrored visualizer
+    # Both sides should show positive magnitude values
+    tick_positions = np.linspace(-data_max, data_max, 9)  # 9 tick marks
+    tick_labels = [f'{abs(pos):.0f}' for pos in tick_positions]  # Show absolute values
+    ax.set_yticks(tick_positions)
+    ax.set_yticklabels(tick_labels)
     
     # Add grid for better readability
     ax.grid(True, alpha=0.3, color='gray')
     ax.set_facecolor('#0a0a0a')
+    
+    # Add a center line for professional look
+    ax.axhline(y=0, color='white', linewidth=1, alpha=0.7)
     
     # Store animation start time for synchronization
     animation_start_time = None
@@ -110,10 +131,17 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
         norm_data = (frame_data - y_min) / (y_max - y_min)
         colors_for_frame = cmap(norm_data)
         
-        # Update bar heights and colors
-        for bar, height, color in zip(bars, frame_data, colors_for_frame):
-            bar.set_height(height)
-            bar.set_color(color)
+        # Update bar heights and colors for both top and bottom bars
+        for bar_top, bar_bottom, height, color in zip(bars_top, bars_bottom, frame_data, colors_for_frame):
+            # Top bars go upward from 0 (positive direction)
+            bar_top.set_height(height)
+            bar_top.set_color(color)
+            
+            # Bottom bars: mirror the visual but keep positive magnitude values
+            # Set bottom position to -height so bars extend from -height to 0
+            bar_bottom.set_height(height)  # Height is positive (same magnitude)
+            bar_bottom.xy = (bar_bottom.xy[0], -height)  # Move bottom of bar to -height
+            bar_bottom.set_color(color)
         
         # Show timing info for debugging
         if animation_start_time is not None:
@@ -126,7 +154,7 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
             ax.set_title(f'Audio Spectrum Animation (Frame {frame_idx + 1}/{num_frames})', 
                         fontsize=14, color='white')
         
-        return bars
+        return bars_top + bars_bottom  # Return both sets of bars
     
     anim = FuncAnimation(fig, update, frames=num_frames, interval=interval_ms, blit=False, repeat=False)
     
@@ -134,7 +162,7 @@ def animate_spectrum(spectrogram: np.ndarray, interval_ms: int = 30,
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=y_min, vmax=y_max))
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax, shrink=0.8, aspect=20)
-    cbar.set_label('Log Magnitude (dB)', rotation=270, labelpad=20, fontsize=12, color='white')
+    cbar.set_label('Magnitude (dB)', rotation=270, labelpad=20, fontsize=12, color='white')
     cbar.ax.yaxis.label.set_color('white')
     cbar.ax.tick_params(colors='white')
     
