@@ -4,7 +4,7 @@ Final project for CS-358: Parallel Computing
 
 ## Overview
 
-This project compares CPU vs GPU performance for audio spectrum computation. It processes audio files by computing spectrograms using both NumPy (CPU) and CuPy (GPU), measures the execution time for each approach, and visualizes the results with an animated spectrum display.
+This project compares CPU vs GPU performance for audio spectrum computation. It processes audio files by computing spectrograms using both NumPy (CPU) and CuPy (GPU), measures the execution time for each approach, and visualizes the results with an animated spectrum display. The pipelines now perform fair, batched FFTs with float32 precision and optional windowing, and the GPU path includes a warm‑up to avoid first‑call overhead.
 
 ## Features
 
@@ -20,20 +20,20 @@ parallel-audio-spectrum/
 ├── src/
 │   ├── audio_utils.py      # Audio loading and framing utilities
 │   ├── cpu_pipeline.py     # CPU-based spectrogram computation
-│   ├── gpu_pipeline.py     # GPU-based spectrogram computation
+│   ├── gpu_pipeline.py     # GPU-based spectrogram computation (batched, warm-up)
 │   ├── visualize.py        # Spectrum animation
 │   └── benchmark.py        # Main benchmark entry point
 ├── data/
-│   └── example.wav         # Sample audio file (user-provided)
+│   └── riser.mp3           # Example audio file (user-provided)
 ├── requirements.txt
 └── README.md
 ```
 
 ## Requirements
 
-- Python 3.8-3.12 (Python 3.14 not yet supported by CuPy)
-- **For GPU acceleration**: NVIDIA CUDA-capable GPU + CUDA Toolkit
-- **macOS users**: Can test CPU pipeline only (no CUDA support on Apple Silicon/Intel Macs)
+- Python 3.8–3.12 (CuPy does not yet support 3.14 at time of writing)
+- For GPU acceleration: NVIDIA CUDA‑capable GPU + matching CUDA runtime
+- Windows/Linux supported for GPU; macOS runs CPU only
 
 ## Installation
 
@@ -54,36 +54,44 @@ pip install -r requirements.txt
 
 The code will gracefully handle missing GPU and run CPU-only with visualization.
 
-### Linux/Windows with NVIDIA GPU
+### Windows/Linux with NVIDIA GPU
 
 ```bash
 # Clone the repository
 git clone https://github.com/azimusmanov/parallel-audio-spectrum.git
 cd parallel-audio-spectrum
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Create virtual environment (PowerShell shown); use your Python
+python -m venv .venv
+. .\.venv\Scripts\Activate.ps1
 
-# Check your CUDA version
-nvidia-smi  # Look for "CUDA Version: X.X"
+# Check CUDA version (Driver reports CUDA runtime)
+nvidia-smi    # Look for: CUDA Version: 12.x or 11.x
 
-# Install dependencies with GPU support
+# Install dependencies (choose the matching CuPy build)
+# Edit requirements-gpu.txt to select the right cupy package OR run one of:
 pip install -r requirements-gpu.txt
+# If mismatch errors occur, explicitly install the correct wheel, e.g.:
+pip install "cupy-cuda12x"  # for CUDA 12.x
+# pip install "cupy-cuda11x"  # for CUDA 11.x
 ```
 
-**Note**: Adjust the CuPy package in `requirements-gpu.txt` based on your CUDA version:
-- CUDA 11.x: `cupy-cuda11x`
-- CUDA 12.x: `cupy-cuda12x`
+Note: The prefilled `requirements-gpu.txt` may show `cupy-cuda13x`; on most systems today you likely need `cupy-cuda12x` (CUDA 12) or `cupy-cuda11x` (CUDA 11).
+
+Quick CUDA/CuPy sanity check:
+```powershell
+cd src
+python .\cuda_test.py   # should print a CuPy array and your GPU name
+```
 
 ## Usage
 
-1. Place a mono WAV audio file in the `data/` directory and name it `example.wav`
+1. Place an audio file in the `data/` directory (e.g., `riser.mp3`).
 
-2. Run the benchmark from the `src/` directory:
-```bash
+2. Run the benchmark from the `src/` directory (PowerShell shown):
+```powershell
 cd src
-python benchmark.py
+python .\benchmark.py ..\data\riser.mp3
 ```
 
 3. The program will:
@@ -134,33 +142,50 @@ RESULTS:
 - Each frame undergoes FFT to extract frequency components
 
 ### CPU Pipeline
-- Uses `numpy.fft.rfft()` for real FFT computation
-- Computes magnitude spectrum with `numpy.abs()`
+- Float32 data; optional Hann window (broadcast)
+- Batched `numpy.fft.rfft(frames, axis=1)` and `numpy.abs` in a single timed block
 
 ### GPU Pipeline
-- Transfers data to GPU using `cupy.asarray()`
-- Uses `cupy.fft.rfft()` for GPU-accelerated FFT
-- Synchronizes GPU computation before timing
-- Transfers results back to CPU for visualization
+- Float32 data; optional Hann window applied on device
+- Single batch transfer to GPU; batched `cupy.fft.rfft(frames_gpu, axis=1)`
+- Warm‑up call before timing to build plans/JIT; explicit synchronize for accurate timing
+- Copies results back to CPU only if needed for visualization
 
 ### Visualization
 - Matplotlib FuncAnimation creates real-time bar chart
 - Each frame shows frequency bin magnitudes
 - Animation loops through all frames
 
-## Performance Considerations
+## Performance & Fairness
 
-- **Data Transfer Overhead**: GPU timing includes CPU↔GPU transfer (realistic for end-to-end performance)
-- **Batch Size**: Larger audio files with more frames benefit more from GPU parallelization
-- **Frame Size**: Larger FFT sizes increase computational complexity, potentially increasing speedup
+- Float32 everywhere: matches precision between CPU and GPU and improves throughput.
+- Batched FFTs: both CPU and GPU compute across all frames in one call.
+- GPU warm‑up: prevents first‑call costs from inflating measured GPU time.
+- Minimize transfers: move frames to GPU once; keep windowing and magnitude on device.
+- Larger workloads yield better GPU speedups. Try:
+  - `frame_size = 4096`, `hop_size = 2048`
+  - Full‑length audio (minutes), not tiny clips
+  - Avoid per‑frame loops; use `axis=1` batched calls
 
 ## Troubleshooting
 
-**CuPy Import Error**: Ensure CUDA is installed and the correct `cupy-cudaXXx` package matches your CUDA version.
+- Missing `nvrtc64_120_0.dll` (or similar): Install the CuPy wheel that matches your CUDA runtime.
+  - CUDA 12.x → `pip install cupy-cuda12x`
+  - CUDA 11.x → `pip install cupy-cuda11x`
+  - Then re-run: `python .\src\cuda_test.py`
 
-**No GPU Speedup**: For small audio files, CPU overhead and data transfer may outweigh GPU benefits. Try longer audio files.
+- No GPU speedup: Ensure batching is active and workload is large enough. Increase `frame_size` and use full tracks. Integrated/low-end GPUs may not beat a fast CPU for tiny FFTs.
 
-**Audio File Not Found**: Ensure `example.wav` exists in the `data/` directory.
+- Audio file not found: Provide a valid path, e.g. `python .\benchmark.py ..\data\riser.mp3`.
+
+### Optional: Apply a Hann window in both pipelines
+Both CPU and GPU functions support an optional `window` argument for fairness. Example snippet if you want to enable it inside `benchmark.py`:
+```python
+import numpy as np
+window = np.hanning(frame_size).astype(np.float32)
+spec_cpu, t_cpu = compute_spectrogram_cpu(frames, window=window)
+spec_gpu, t_gpu = compute_spectrogram_gpu(frames, window=window)
+```
 
 ## License
 
