@@ -2,7 +2,7 @@
 # Use this file on station with NVIDIA GPU
 
 numpy
-cupy-cuda12x
+cupy-cuda13x
 librosa
 soundfile
 matplotlib
